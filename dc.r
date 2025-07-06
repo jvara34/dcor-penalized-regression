@@ -7,8 +7,8 @@ library(dplyr)
 library(energy)
 
 # Upload the dataset 
-
-
+df <- read.csv("Dataset/test.csv")
+print(head(df))
 # Determine the y variable 
 
 # Determine the x variables 

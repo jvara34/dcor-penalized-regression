@@ -1,7 +1,7 @@
 # 📌 Project TODO – Summer Research 2025
 
 ## 🗂️ Data Preparation
-- [ ] Clean dataset Sample - 
+- [x] Clean dataset Sample - 
 - [ ] Identify `y` and `x` variables – 
 
 ## 📊 Distance Correlation Code
