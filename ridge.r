@@ -3,6 +3,8 @@ library(ggplot2)
 library(dplyr)
 library(energy)
 library(glmnet)
+library(stats)
+library(AICcmodavg)
 
 
 # New Dataset for gene expression 
@@ -10,7 +12,8 @@ bcTCGA <- readRDS("~/Documents/Research/R Files/bcTCGA.rds")
 
 summary(bcTCGA)
 
-# Create Random High dimensional dataset  
+# Synthetic dataset
+# Only working with the synthetic dataset will work on the real dataset later 
 set.seed(123)
 n <- 100
 p <- 500
@@ -24,22 +27,6 @@ compute_dcor <- function(X, y) {
   return(sort(dcor_values, decreasing = TRUE))
 }
 
-
-# Call function compute_dcor and save the results  
-get_mse <- function(fit) {
-  min(fit$cvm)
-}
-
-fit_ridge <- function(x_sub, y) {
-  x_mat <- as.matrix(x_sub)
-  fit <- cv.glmnet(x_mat, y, alpha = 0)
-  #best_lamb <- fit$lambda.min
- # min_mse <- min(fit$cvm)
-  #cat("Mini CV MSE:", min_mse, "\n")
-  
-  return(fit)
-}
-
 subset_by_dcor <- function(X, dcor_values, threshold) {
   keep_vars <- names(dcor_values[dcor_values > threshold])
   if (length(keep_vars) == 0) {
@@ -48,44 +35,51 @@ subset_by_dcor <- function(X, dcor_values, threshold) {
   return(X[, keep_vars, drop = FALSE])
 }
 
-# Fit Several Linear Models for various threshold values of distance correlation
-res <- compute_dcor(X, y)
-thresholds <- seq(0.1, 1.0, by = 0.1)
-mses <- numeric(length(thresholds))
-
-# This function will use get_mse() and fit_ridge() to compute all of the dcor values and give MSE 
-compute_lm_dcor <- function(X, y, res, thresholds){
-  # for linear models 
-  models <- list()
-  # compare the res with the different thresholds 
-  for (i in seq_along(thresholds)) {
-    t <- thresholds[i]
-    cat("\nThreshold:", t, "\n")
-    
-    # 1) find the variables that fit within the thresholds   
-    x_sub <- tryCatch(subset_by_dcor(X, res, t), error = function(e) {
-      cat("Threshold", t, "was skipped -", e$message, "\n")
-      mses[i] <- NA 
-      models[[paste0("Thresh", t)]] <- NULL 
-      return(NULL)
-    }
-    )
-    if (is.null(x_sub)) next
-    # 2) Fit the linear model with the subset of dcor variables 
-    fit <- fit_ridge (x_sub, y)
-    mse <- get_mse(fit)
-    mses[i] <- mse
-    models[[paste0("thresh_", t)]] <- fit
-    # Mean Square Error 
-    mses[i] <- get_mse(fit)
-  }
-  # Trying to figure out the best lambda to use for this dataset 
-  mse_results <- data.frame(threshold = thresholds, MSE = mses)
+# Ridge regression with AIC and BIC
+fit_ridge_with_aic_bic <- function(x_sub, y) {
+  x_mat <- as.matrix(x_sub)
+  ridge_fit <- cv.glmnet(x_mat, y, alpha = 0)
+  lambda_min <- ridge_fit$lambda.min
+  final_fit <- glmnet(x_mat, y, alpha = 0, lambda = lambda_min)
   
-  # Return the values of mse_results 
-  return(mse_results)
+  y_pred <- predict(final_fit, newx = x_mat, s = lambda_min)
+  residuals <- y - y_pred
+  rss <- sum(residuals^2)
+  
+  df <- final_fit$df
+  n <- length(y)
+  
+  # Compute AIC and BIC
+  aic <- n * log(rss / n) + 2 * df
+  bic <- n * log(rss / n) + log(n) * df
+  # Returning both AIC and BIC 
+  return(list(fit = final_fit, AIC = aic, BIC = bic, MSE = mean(residuals^2)))
 }
 
-L <- compute_lm_dcor(X, y, res, thresholds)
-print(L)
+# Thresholds and results
+res <- compute_dcor(X, y)
+thresholds <- seq(0.1, 1.0, by = 0.1)
+
+ridge_results <- data.frame(threshold = thresholds, MSE = NA, AIC = NA, BIC = NA)
+
+for (i in seq_along(thresholds)) {
+  t <- thresholds[i]
+  cat("\nThreshold:", t, "\n")
+  
+  x_sub <- tryCatch(
+    subset_by_dcor(X, res, t),
+    error = function(e) {
+      cat("Threshold", t, "skipped -", e$message, "\n")
+      return(NULL)
+    }
+  )
+  if (is.null(x_sub)) next
+  
+  result <- fit_ridge_with_aic_bic(x_sub, y)
+  ridge_results$MSE[i] <- result$MSE
+  ridge_results$AIC[i] <- result$AIC
+  ridge_results$BIC[i] <- result$BIC
+}
+# Printing the Threshold, MSE, AIC, and the BIC results 
+print(ridge_results)
 
